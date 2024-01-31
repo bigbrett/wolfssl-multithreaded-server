@@ -1,0 +1,5 @@
+*.o
+main
+tags
+wolfssl-install/
+*.log

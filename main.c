@@ -17,7 +17,7 @@ WOLFSSL_CTX *ctx; /* Global SSL context */
 void *handleClient(void *arg);
 
 int main() {
-    int sockfd, newsockfd;
+    int sockfd, *newsockfd;
     struct sockaddr_in serv_addr, cli_addr;
     socklen_t clilen;
     pthread_t thread;
@@ -65,32 +65,30 @@ int main() {
 
     /* Accept actual connections from clients */
     while (1) {
-        newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-        if (newsockfd < 0) {
-            perror("ERROR on accept");
+        newsockfd = malloc(sizeof(int)); // Allocate memory for each connection's socket descriptor
+        if (newsockfd == NULL) {
+            perror("ERROR allocating memory for new socket");
             continue;
         }
 
-        printf("New connection received from sock=%d, p=%d\n", newsockfd, cli_addr.sin_port);
+        *newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+        if (*newsockfd < 0) {
+            perror("ERROR on accept");
+            free(newsockfd); // Free the allocated memory in case of error
+            continue;
+        }
 
         /* Spawn thread to handle client */
-        //if (pthread_create(&thread, NULL, handleClient, (void *)&newsockfd) < 0) {
-        //    perror("ERROR creating thread");
-        //    close(newsockfd);
-        //}
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
-		/* Spawn thread to handle client */
-		pthread_attr_t attr;
-		pthread_attr_init(&attr);
-		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED); // Set thread as detached
-
-		if (pthread_create(&thread, &attr, handleClient, (void *)&newsockfd) < 0) {
-			perror("ERROR creating thread");
-			close(newsockfd);
-		}
-
-		pthread_attr_destroy(&attr); // Destroy thread attributes
-
+        if (pthread_create(&thread, &attr, handleClient, (void *)newsockfd) < 0) {
+            perror("ERROR creating thread");
+            close(*newsockfd);
+            free(newsockfd); // Free the allocated memory in case of error
+        }
+        pthread_attr_destroy(&attr);
     }
 
     /* Clean up */
@@ -119,12 +117,15 @@ void *handleClient(void *arg) {
     wolfSSL_set_fd(ssl, sock);
 
     /* Perform TLS handshake */
+    printf("[%d] accepting connection\n", sock);
     if (wolfSSL_accept(ssl) != SSL_SUCCESS) {
         perror("ERROR in SSL accept");
         wolfSSL_free(ssl);
         close(sock);
         return NULL;
     }
+    printf("[%d] accepted\n", sock);
+
 
     /* Continuously read client data and echo back until client closes connection */
     while (1) {
